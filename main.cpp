@@ -17,16 +17,28 @@ static inline uint32_t rng32(){
     seed64 ^= seed64 << 7; seed64 ^= seed64 >> 9; seed64 ^= seed64 << 8; return (uint32_t)seed64;
 }
 
+static vector<Node*> pool; // track all allocations
+static inline Node* alloc_node(const Node& from){
+    Node* p = new Node(from);
+    pool.push_back(p);
+    return p;
+}
+static inline Node* alloc_node_kp(long long k, uint32_t pr){
+    Node* p = new Node(k, pr);
+    pool.push_back(p);
+    return p;
+}
+
 // Persistent merge: returns new root
 static Node* merge(Node* a, Node* b){
     if(!a) return b; if(!b) return a;
     if(a->pr < b->pr){
-        Node* na = new Node(*a);
+        Node* na = alloc_node(*a);
         na->r = merge(a->r, b);
         pull(na);
         return na;
     }else{
-        Node* nb = new Node(*b);
+        Node* nb = alloc_node(*b);
         nb->l = merge(a, b->l);
         pull(nb);
         return nb;
@@ -37,13 +49,13 @@ static Node* merge(Node* a, Node* b){
 static pair<Node*,Node*> split_le(Node* t, long long key){
     if(!t) return {nullptr,nullptr};
     if(t->k <= key){
-        Node* nt = new Node(*t);
+        Node* nt = alloc_node(*t);
         auto pr = split_le(t->r, key);
         nt->r = pr.first;
         pull(nt);
         return {nt, pr.second};
     }else{
-        Node* nt = new Node(*t);
+        Node* nt = alloc_node(*t);
         auto pr = split_le(t->l, key);
         nt->l = pr.second;
         pull(nt);
@@ -63,7 +75,7 @@ static bool contains(Node* t, long long key){
 static Node* insert_key(Node* t, long long key, bool &inserted){
     if(contains(t, key)) { inserted = false; return t; }
     inserted = true;
-    Node* n = new Node(key, rng32());
+    Node* n = alloc_node_kp(key, rng32());
     auto pr = split_le(t, key);
     return merge( merge(pr.first, n), pr.second );
 }
