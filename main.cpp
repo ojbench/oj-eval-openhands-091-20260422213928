@@ -3,90 +3,83 @@ using namespace std;
 
 struct Node {
     long long k;
-    uint32_t pr;
+    int l, r;
     int sz;
-    Node *l, *r;
-    Node(long long _k, uint32_t _pr) : k(_k), pr(_pr), sz(1), l(nullptr), r(nullptr) {}
+    uint32_t pr;
+    Node() : k(0), l(0), r(0), sz(1), pr(0) {}
+    Node(long long _k, uint32_t _pr) : k(_k), l(0), r(0), sz(1), pr(_pr) {}
 };
 
-static inline int getsz(Node* t){ return t? t->sz : 0; }
-static inline void pull(Node* t){ if(t) t->sz = 1 + getsz(t->l) + getsz(t->r); }
+static inline int getsz(const vector<Node>& t, int x){ return x? t[x].sz : 0; }
+static inline void pull(vector<Node>& t, int x){ if(x) t[x].sz = 1 + getsz(t, t[x].l) + getsz(t, t[x].r); }
 
 static thread_local uint64_t seed64 = 88172645463393265ull;
-static inline uint32_t rng32(){
-    seed64 ^= seed64 << 7; seed64 ^= seed64 >> 9; seed64 ^= seed64 << 8; return (uint32_t)seed64;
+static inline uint32_t rng32(){ seed64 ^= seed64 << 7; seed64 ^= seed64 >> 9; seed64 ^= seed64 << 8; return (uint32_t)seed64; }
+
+static vector<Node> pool;
+static inline int clone_node(int x){
+    pool.push_back(pool[x]);
+    return (int)pool.size()-1;
+}
+static inline int make_node(long long k){
+    pool.emplace_back(k, rng32());
+    return (int)pool.size()-1;
 }
 
-static vector<Node*> pool; // track all allocations
-static inline Node* alloc_node(const Node& from){
-    Node* p = new Node(from);
-    pool.push_back(p);
-    return p;
-}
-static inline Node* alloc_node_kp(long long k, uint32_t pr){
-    Node* p = new Node(k, pr);
-    pool.push_back(p);
-    return p;
-}
-
-// Persistent merge: returns new root
-static Node* merge(Node* a, Node* b){
+static int merge(int a, int b){
     if(!a) return b; if(!b) return a;
-    if(a->pr < b->pr){
-        Node* na = alloc_node(*a);
-        na->r = merge(a->r, b);
-        pull(na);
+    if(pool[a].pr < pool[b].pr){
+        int na = clone_node(a);
+        pool[na].r = merge(pool[a].r, b);
+        pull(pool, na);
         return na;
     }else{
-        Node* nb = alloc_node(*b);
-        nb->l = merge(a, b->l);
-        pull(nb);
+        int nb = clone_node(b);
+        pool[nb].l = merge(a, pool[b].l);
+        pull(pool, nb);
         return nb;
     }
 }
 
-// split by key: <= key goes to a, > key to b
-static pair<Node*,Node*> split_le(Node* t, long long key){
-    if(!t) return {nullptr,nullptr};
-    if(t->k <= key){
-        Node* nt = alloc_node(*t);
-        auto pr = split_le(t->r, key);
-        nt->r = pr.first;
-        pull(nt);
+static pair<int,int> split_le(int t, long long key){
+    if(!t) return {0,0};
+    if(pool[t].k <= key){
+        int nt = clone_node(t);
+        auto pr = split_le(pool[t].r, key);
+        pool[nt].r = pr.first;
+        pull(pool, nt);
         return {nt, pr.second};
     }else{
-        Node* nt = alloc_node(*t);
-        auto pr = split_le(t->l, key);
-        nt->l = pr.second;
-        pull(nt);
+        int nt = clone_node(t);
+        auto pr = split_le(pool[t].l, key);
+        pool[nt].l = pr.second;
+        pull(pool, nt);
         return {pr.first, nt};
     }
 }
 
-static bool contains(Node* t, long long key){
+static bool contains(int t, long long key){
     while(t){
-        if(key < t->k) t = t->l;
-        else if(key > t->k) t = t->r;
+        if(key < pool[t].k) t = pool[t].l;
+        else if(key > pool[t].k) t = pool[t].r;
         else return true;
     }
     return false;
 }
 
-static Node* insert_key(Node* t, long long key, bool &inserted){
+static int insert_key(int t, long long key, bool &inserted){
     if(contains(t, key)) { inserted = false; return t; }
     inserted = true;
-    Node* n = alloc_node_kp(key, rng32());
+    int n = make_node(key);
     auto pr = split_le(t, key);
     return merge( merge(pr.first, n), pr.second );
 }
 
-static Node* erase_key(Node* t, long long key, bool &erased){
-    // split into <key, >=key
+static int erase_key(int t, long long key, bool &erased){
     auto p1 = split_le(t, key-1);
-    auto p2 = split_le(p1.second, key); // p2.first are ==key
+    auto p2 = split_le(p1.second, key); // p2.first == key
     if(p2.first){
         erased = true;
-        // drop p2.first
         return merge(p1.first, p2.second);
     }else{
         erased = false;
@@ -94,38 +87,38 @@ static Node* erase_key(Node* t, long long key, bool &erased){
     }
 }
 
-static int cnt_le(Node* t, long long key){
+static int cnt_le(int t, long long key){
     int ans = 0;
     while(t){
-        if(key < t->k){
-            t = t->l;
+        if(key < pool[t].k){
+            t = pool[t].l;
         }else{
-            ans += 1 + getsz(t->l);
-            t = t->r;
+            ans += 1 + getsz(pool, pool[t].l);
+            t = pool[t].r;
         }
     }
     return ans;
 }
 
-static bool predecessor(Node* t, long long key, long long &res){
+static bool predecessor(int t, long long key, long long &res){
     bool ok = false; long long best = 0;
     while(t){
-        if(key <= t->k){
-            t = t->l;
+        if(key <= pool[t].k){
+            t = pool[t].l;
         }else{
-            ok = true; best = t->k; t = t->r;
+            ok = true; best = pool[t].k; t = pool[t].r;
         }
     }
     if(ok) res = best; return ok;
 }
 
-static bool successor(Node* t, long long key, long long &res){
+static bool successor(int t, long long key, long long &res){
     bool ok = false; long long best = 0;
     while(t){
-        if(key >= t->k){
-            t = t->r;
+        if(key >= pool[t].k){
+            t = pool[t].r;
         }else{
-            ok = true; best = t->k; t = t->l;
+            ok = true; best = pool[t].k; t = pool[t].l;
         }
     }
     if(ok) res = best; return ok;
@@ -135,8 +128,7 @@ int main(){
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
 
-    vector<Node*> roots(1, nullptr);
-    int lst = 0;
+    vector<int> roots(1, 0);
     bool valid = false;
     int it_a = -1;
     long long it_key = 0;
@@ -147,13 +139,11 @@ int main(){
         switch(op){
             case 0: { // insert
                 cin >> a >> b;
-                if (a >= (long long)roots.size()) roots.resize(a+1, nullptr);
+                if (a >= (long long)roots.size()) roots.resize(a+1, 0);
                 bool inserted;
-                Node* nr = insert_key(roots[a], b, inserted);
-                roots[a] = nr;
-                if(inserted){
-                    it_a = (int)a; it_key = b; valid = true;
-                }
+                int nr = insert_key(roots[(size_t)a], b, inserted);
+                roots[(size_t)a] = nr;
+                if(inserted){ it_a = (int)a; it_key = b; valid = true; }
                 break;
             }
             case 1: { // erase
@@ -161,22 +151,21 @@ int main(){
                 if (a < (long long)roots.size()){
                     if (valid && it_a == (int)a && it_key == b) valid = false;
                     bool erased;
-                    roots[a] = erase_key(roots[a], b, erased);
+                    roots[(size_t)a] = erase_key(roots[(size_t)a], b, erased);
                 }
                 break;
             }
             case 2: { // copy
                 cin >> a;
-                if (a >= (long long)roots.size()) roots.resize(a+1, nullptr);
-                roots.push_back(roots[a]);
-                lst++;
+                if (a >= (long long)roots.size()) roots.resize(a+1, 0);
+                roots.push_back(roots[(size_t)a]);
                 break;
             }
             case 3: { // find
                 cin >> a >> b;
                 bool found = false;
                 if (a < (long long)roots.size()){
-                    found = contains(roots[a], b);
+                    found = contains(roots[(size_t)a], b);
                     if(found){ it_a = (int)a; it_key = b; valid = true; }
                 }
                 cout << (found?"true":"false") << '\n';
@@ -186,8 +175,8 @@ int main(){
                 cin >> a >> b >> c;
                 long long ans = 0;
                 if (a < (long long)roots.size()){
-                    int right = cnt_le(roots[a], c);
-                    int left = cnt_le(roots[a], b-1);
+                    int right = cnt_le(roots[(size_t)a], c);
+                    int left = cnt_le(roots[(size_t)a], b-1);
                     ans = (long long)right - (long long)left;
                 }
                 cout << ans << '\n';
@@ -196,7 +185,7 @@ int main(){
             case 5: { // prev
                 if (valid && it_a < (int)roots.size()){
                     long long res;
-                    if(predecessor(roots[it_a], it_key, res)){
+                    if(predecessor(roots[(size_t)it_a], it_key, res)){
                         it_key = res;
                         cout << it_key << '\n';
                         break;
@@ -210,7 +199,7 @@ int main(){
             case 6: { // next
                 if (valid && it_a < (int)roots.size()){
                     long long res;
-                    if(successor(roots[it_a], it_key, res)){
+                    if(successor(roots[(size_t)it_a], it_key, res)){
                         it_key = res;
                         cout << it_key << '\n';
                         break;
@@ -225,21 +214,5 @@ int main(){
                 break;
         }
     }
-
-    // Free all allocated nodes to avoid memory leak detection
-    unordered_set<Node*> vis;
-    vis.reserve(1<<20);
-    vector<Node*> st;
-    for(Node* r : roots){
-        if(!r) continue;
-        if(vis.insert(r).second) st.push_back(r);
-        while(!st.empty()){
-            Node* t = st.back(); st.pop_back();
-            if(t->l && vis.insert(t->l).second) st.push_back(t->l);
-            if(t->r && vis.insert(t->r).second) st.push_back(t->r);
-        }
-    }
-    for(Node* n : vis) delete n;
-
     return 0;
 }
