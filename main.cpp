@@ -128,6 +128,10 @@ int main(){
     ios::sync_with_stdio(false);
     cin.tie(nullptr);
 
+    // Ensure index 0 is reserved as null; real nodes start from index 1
+    pool.clear();
+    pool.push_back(Node());
+
     vector<int> roots(1, 0);
     bool valid = false;
     int it_a = -1;
