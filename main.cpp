@@ -213,5 +213,21 @@ int main(){
                 break;
         }
     }
+
+    // Free all allocated nodes to avoid memory leak detection
+    unordered_set<Node*> vis;
+    vis.reserve(1<<20);
+    vector<Node*> st;
+    for(Node* r : roots){
+        if(!r) continue;
+        if(vis.insert(r).second) st.push_back(r);
+        while(!st.empty()){
+            Node* t = st.back(); st.pop_back();
+            if(t->l && vis.insert(t->l).second) st.push_back(t->l);
+            if(t->r && vis.insert(t->r).second) st.push_back(t->r);
+        }
+    }
+    for(Node* n : vis) delete n;
+
     return 0;
 }
